@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.northnroro.golfgame'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.northnroro.golfgame'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '1.0-android-port'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    androidResources {
+        noCompress += ['wav']
+    }
+}
+
+def generatedAssets = layout.buildDirectory.dir('generated/sharedGameAssets')
+
+tasks.register('syncSharedGameAssets', Sync) {
+    from('../../src/game') {
+        include '**/*.png'
+        include '**/*.txt'
+        include '**/*.wav'
+    }
+    into(generatedAssets.map { it.dir('game') })
+}
+
+android.sourceSets.main.assets.srcDir(generatedAssets)
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('syncSharedGameAssets')
+}
