@@ -3,28 +3,27 @@
 ## Branch workflow
 
 - Treat `master` as the stable branch. Do not develop directly on `master`.
-- Use `develop` as the default working branch for requested changes.
-- Before starting work, compare the chosen development branch with `master`.
-- If `develop` already contains unrelated unfinished/unmerged work, it is acceptable to create a separate branch named `develop-<feature_name>` for the new task instead of mixing unrelated work.
-- When using a `develop-<feature_name>` branch, clearly warn the user which commits/messages on that branch (or on `develop`) are not yet present in `master`, so the user knows what remains unmerged.
+- Use `develop` as the single default working branch for all requested changes, even when it contains unrelated unfinished or unmerged work.
+- Do not create `develop-<feature_name>` or any other feature branch unless the user explicitly asks for a separate branch.
+- Before starting work, compare `develop` with `master` and keep the user aware of commits/features that are not yet in `master` when relevant.
+- It is acceptable for multiple in-progress features to accumulate together on `develop`.
 
 ## Checkpoint commits
 
 - Commit working progress frequently so changes are recoverable.
-- As a practical default, make at least one useful checkpoint commit per user prompt when code or repository files were changed, unless the prompt results in no meaningful change.
-- Keep checkpoint commit messages specific enough that the user can understand what was changed from the commit history.
-- Avoid bundling unrelated features into the same commit when they can reasonably be separated.
+- As a practical default, make about one useful checkpoint commit per user prompt when code or repository files were changed, unless the prompt results in no meaningful change.
+- Keep checkpoint commit messages specific enough that the user can understand what changed from the commit history.
+- Unrelated features may coexist on `develop`; commits should still be reasonably descriptive checkpoints.
 
 ## Build and verification
 
 - After making a playable/build-related change, run the relevant CI/build and provide the resulting artifact when practical.
-- Prefer keeping the Windows x64 build pipeline working on the active development branch.
+- Keep platform build pipelines working on `develop` when possible.
 - Do not treat a successful compile alone as confirmation that gameplay works; user testing is the final verification for interactive/game behavior.
 
 ## Merge policy
 
-- Do not merge development work into `master` merely because CI passes.
-- Wait for the user to explicitly confirm that the built game/change works as expected.
-- Once the user confirms it works, the development branch may be merged into `master`.
-- Before merging, summarize the commits/features that will enter `master`, especially if the branch contains more than the feature most recently discussed.
-- If the branch includes unrelated unfinished work, do not merge all of it silently; either use a clean feature branch or clearly warn the user and keep unfinished work out of `master`.
+- Do not merge development work into `master` merely because CI passes unless the user explicitly asks to merge it.
+- When the user confirms a build/change works, or explicitly asks to merge, `develop` may be merged into `master`.
+- Before merging, summarize the commits/features that will enter `master`, especially when `develop` contains several accumulated changes.
+- Never silently drop unrelated work from `develop`; if the user asks to merge the branch, assume the accumulated `develop` state is intended unless they say otherwise.
