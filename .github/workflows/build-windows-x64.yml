@@ -1,0 +1,80 @@
+name: Build Windows x64
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17 x64
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          architecture: x64
+
+      - name: Compile Java sources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build/classes | Out-Null
+          $sources = Get-ChildItem -Path src -Recurse -Filter *.java | ForEach-Object { $_.FullName }
+          if (-not $sources) { throw 'No Java source files found.' }
+          javac -encoding UTF-8 -d build/classes $sources
+
+      - name: Copy runtime resources
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path src -Recurse -File | Where-Object { $_.Extension -ne '.java' -and $_.Extension -ne '.class' } | ForEach-Object {
+            $relative = $_.FullName.Substring((Resolve-Path src).Path.Length).TrimStart('\\','/')
+            $target = Join-Path 'build/classes' $relative
+            New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+            Copy-Item $_.FullName $target -Force
+          }
+
+      - name: Create executable JAR
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build/jar | Out-Null
+          jar --create --file build/jar/GolfGame.jar --main-class game.GolfGame -C build/classes .
+          jar --list --file build/jar/GolfGame.jar | Select-String 'game/GolfGame.class|game/stage/course_list.txt|splash_screen.png'
+
+      - name: Create portable Windows x64 app image
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build/package | Out-Null
+          jpackage `
+            --type app-image `
+            --name GolfGame `
+            --input build/jar `
+            --main-jar GolfGame.jar `
+            --main-class game.GolfGame `
+            --dest build/package `
+            --java-options '-Dfile.encoding=UTF-8'
+
+      - name: Smoke-check package
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'build/package/GolfGame/GolfGame.exe')) { throw 'GolfGame.exe was not created.' }
+          Get-ChildItem 'build/package/GolfGame' -Recurse | Select-Object FullName, Length
+
+      - name: Zip portable game
+        shell: pwsh
+        run: |
+          $zip = 'GolfGame-Windows-x64.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path 'build/package/GolfGame' -DestinationPath $zip
+
+      - name: Upload Windows x64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GolfGame-Windows-x64
+          path: GolfGame-Windows-x64.zip
+          if-no-files-found: error
