@@ -41,6 +41,7 @@ import game.stage.GolfCourse;
 import game.stage.GolfHole;
 import game.stage.HoleLoader;
 import game.stage.HoleManage;
+import game.sound.SoundManager;
 
 public class DisplayFrame extends JFrame {
 	private Golfer[] golfer;
@@ -48,6 +49,7 @@ public class DisplayFrame extends JFrame {
 	private GolfCourse golfCourse;
 	private HoleManage holeManage;
 	private ArrayList<Integer> optionSequence = new ArrayList<Integer>();
+	private final boolean[] comboKeyDown = new boolean[4];
 	private double camX, camY, moveCamX, moveCamY, camSmooth = 10.0;
 
 	private ImageIcon icon;
@@ -66,6 +68,7 @@ public class DisplayFrame extends JFrame {
 
 	public DisplayFrame() {
 		super("<<" + GolfGame.GAME_NAME + ">>");
+		setAlwaysOnTop(true);
 		try {
 			bgCredit = ImageIO.read(getClass().getClassLoader().getResource(
 					"game/menuImage/Credits_bg.png"));
@@ -131,6 +134,7 @@ public class DisplayFrame extends JFrame {
 		start.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
+				SoundManager.playClick();
 				// TODO Auto-generated method stub
 				// TEST
 				// label.remove(panelTitle);
@@ -149,6 +153,7 @@ public class DisplayFrame extends JFrame {
 		howTo.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
+				SoundManager.playClick();
 				// TODO Auto-generated method stub
 				optionSequence.add(1);
 				getLabel().remove(getPanelTitle());
@@ -159,6 +164,7 @@ public class DisplayFrame extends JFrame {
 		credit.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
+				SoundManager.playClick();
 				// TODO Auto-generated method stub
 				optionSequence.add(2);
 				getLabel().remove(getPanelTitle());
@@ -205,6 +211,7 @@ public class DisplayFrame extends JFrame {
 
 			@Override
 			public void actionPerformed(ActionEvent e) {
+				SoundManager.playClick();
 				// TODO Auto-generated method stub
 				clear();
 				optionSequence.clear();
@@ -247,6 +254,7 @@ public class DisplayFrame extends JFrame {
 
 			@Override
 			public void actionPerformed(ActionEvent e) {
+				SoundManager.playClick();
 				// TODO Auto-generated method stub
 				clear();
 				optionSequence.clear();
@@ -321,77 +329,87 @@ public class DisplayFrame extends JFrame {
 
 			@Override
 			public void keyPressed(KeyEvent e) {
-				// System.out.println("OK");
-				if (holeManage != null) {
-					if (holeManage.isAiming()) {
-						if (KeyEvent.getKeyText(e.getKeyCode()).equals("Space")) {
-							bt.setPressed(true);
-						} else if (bt.isPressed()) {
-							if (KeyEvent.getKeyText(e.getKeyCode())
-									.equals("Up")) {
-								bt.addCombo(0b0);
-							}
-							if (KeyEvent.getKeyText(e.getKeyCode()).equals(
-									"Right")) {
-								bt.addCombo(0b1);
-							}
-							if (KeyEvent.getKeyText(e.getKeyCode()).equals(
-									"Down")) {
-								bt.addCombo(0b10);
-							}
-							if (KeyEvent.getKeyText(e.getKeyCode()).equals(
-									"Left")) {
-								bt.addCombo(0b11);
-							}
-						}
-					} else if (!holeManage.isFlying()) {
-						if (KeyEvent.getKeyText(e.getKeyCode()).equals("Space")) {
-							holeManage.setAiming(true);
-							bt = new BarThread(holeManage);
-							Thread t = new Thread(bt);
-							holeManage.setBarThread(t);
-							t.start();
-						}
+				if (holeManage == null)
+					return;
+
+				int keyCode = e.getKeyCode();
+				int comboDirection = comboDirectionForKey(keyCode);
+
+				if (holeManage.isAiming() && bt != null) {
+					if (keyCode == KeyEvent.VK_SPACE) {
+						bt.setPressed(true);
+					} else if (bt.isPressed() && comboDirection >= 0
+							&& !comboKeyDown[comboDirection]) {
+						bt.addCombo(comboDirection);
 					}
-					if (KeyEvent.getKeyText(e.getKeyCode()).equals("Up")) {
-						holeManage.upPressed = true;
-					} else if (KeyEvent.getKeyText(e.getKeyCode()).equals(
-							"Down")) {
-						holeManage.downPressed = true;
-					}
-					if (KeyEvent.getKeyText(e.getKeyCode()).equals("Right")) {
-						holeManage.rightPressed = true;
-					} else if (KeyEvent.getKeyText(e.getKeyCode()).equals(
-							"Left")) {
-						holeManage.leftPressed = true;
-					}
-					if (KeyEvent.getKeyText(e.getKeyCode()).equals("Ctrl")) {
-						holeManage.ctrlPressed = true;
-					}
+				} else if (!holeManage.isFlying()
+						&& keyCode == KeyEvent.VK_SPACE) {
+					holeManage.setAiming(true);
+					bt = new BarThread(holeManage);
+					Thread t = new Thread(bt);
+					holeManage.setBarThread(t);
+					t.start();
+				}
+
+				if (comboDirection >= 0)
+					comboKeyDown[comboDirection] = true;
+
+				if (keyCode == KeyEvent.VK_UP) {
+					holeManage.upPressed = true;
+				} else if (keyCode == KeyEvent.VK_DOWN) {
+					holeManage.downPressed = true;
+				}
+				if (keyCode == KeyEvent.VK_RIGHT) {
+					holeManage.rightPressed = true;
+				} else if (keyCode == KeyEvent.VK_LEFT) {
+					holeManage.leftPressed = true;
+				}
+				if (keyCode == KeyEvent.VK_CONTROL) {
+					holeManage.ctrlPressed = true;
+				}
+			}
+
+			@Override
+			public void keyReleased(KeyEvent e) {
+				int keyCode = e.getKeyCode();
+				int comboDirection = comboDirectionForKey(keyCode);
+				if (comboDirection >= 0)
+					comboKeyDown[comboDirection] = false;
+
+				if (holeManage == null)
+					return;
+
+				if (keyCode == KeyEvent.VK_UP) {
+					holeManage.upPressed = false;
+				} else if (keyCode == KeyEvent.VK_DOWN) {
+					holeManage.downPressed = false;
+				}
+				if (keyCode == KeyEvent.VK_RIGHT) {
+					holeManage.rightPressed = false;
+				} else if (keyCode == KeyEvent.VK_LEFT) {
+					holeManage.leftPressed = false;
+				}
+				if (keyCode == KeyEvent.VK_CONTROL) {
+					holeManage.ctrlPressed = false;
 				}
 			}
 		});
-		addKeyListener(new KeyAdapter() {
-			@Override
-			public void keyReleased(KeyEvent e) {
-				if (KeyEvent.getKeyText(e.getKeyCode()).equals("Up")) {
-					holeManage.upPressed = false;
-				} else if (KeyEvent.getKeyText(e.getKeyCode()).equals("Down")) {
-					holeManage.downPressed = false;
-				}
-				if (KeyEvent.getKeyText(e.getKeyCode()).equals("Right")) {
-					holeManage.rightPressed = false;
-				} else if (KeyEvent.getKeyText(e.getKeyCode()).equals("Left")) {
-					holeManage.leftPressed = false;
-				}
-				if (KeyEvent.getKeyText(e.getKeyCode()).equals("Ctrl")) {
-					holeManage.ctrlPressed = false;
-				}
-			};
-		});
+
 		clear();
 		setResizable(false);
 		// setVisible(true);
+	}
+
+	private static int comboDirectionForKey(int keyCode) {
+		if (keyCode == KeyEvent.VK_UP)
+			return 0;
+		if (keyCode == KeyEvent.VK_RIGHT)
+			return 1;
+		if (keyCode == KeyEvent.VK_DOWN)
+			return 2;
+		if (keyCode == KeyEvent.VK_LEFT)
+			return 3;
+		return -1;
 	}
 
 	public void clear() {

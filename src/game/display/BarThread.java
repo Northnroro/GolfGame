@@ -17,6 +17,7 @@ import game.GolfGame;
 import game.character.Golfer;
 import game.effect.graphics.Animation;
 import game.stage.HoleManage;
+import game.sound.SoundManager;
 
 public class BarThread implements Runnable {
 	private HoleManage hm;
@@ -131,6 +132,7 @@ public class BarThread implements Runnable {
 											* Math.sin(hm.getCurrAngle()
 													* Math.PI / 180));
 							g.getBall().setCombo(comboList);
+							SoundManager.playShot(percent);
 							// -----------------------------------
 							hm.setFlying(true);
 							Thread.sleep(100);

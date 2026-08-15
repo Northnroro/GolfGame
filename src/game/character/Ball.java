@@ -16,16 +16,22 @@ import game.effect.graphics.Animation;
 import game.effect.graphics.ParticleEffect;
 import game.stage.GolfHole;
 import game.stage.HoleLoader;
+import game.sound.SoundManager;
 
 public class Ball {
 	public static final int BALL_SIZE = 11, NUM_CHECK_BOUND = 10;
 	public static final double GRAVITY = 0.2, STOP_DIFFERENCE = 3.5;
 	public static final int COMBO_COMBINATION[] = new int[] { 0b110110001010,
 			0b001011010000 };// 0:LRDUDD(ShootingStar) 1:UDLRUU(Tornado)
+	public static final String[] COMBO_NAMES = new String[] { "Shooting Star", "Tornado" };
+	public static final String[] COMBO_INPUTS = new String[] {
+			"\u2190 \u2192 \u2193 \u2191 \u2193 \u2193",
+			"\u2191 \u2193 \u2190 \u2192 \u2191 \u2191" };
 	private Animation ani;
 	private double checkBound[][] = new double[NUM_CHECK_BOUND][2];// x, y
 	private double x, y, dx, dy, dr;
 	private double differencePosition = 0;
+	private long lastBounceSoundMs = 0L;
 	private boolean combo[] = new boolean[COMBO_COMBINATION.length];
 	private DisplayFrame frame;
 
@@ -69,6 +75,12 @@ public class Ball {
 			double newAngle = (double) result[0];
 			double fric = (double) result[1];
 			double currSpeed = Math.hypot(dx, dy);
+			double bounceImpact = Math.abs(dy);
+			long now = System.currentTimeMillis();
+			if (bounceImpact > 1.2 && now - lastBounceSoundMs > 180) {
+				SoundManager.playBounce(bounceImpact);
+				lastBounceSoundMs = now;
+			}
 			currSpeed *= fric;
 			double addRotate = 0;// test
 			for (int i = 0; i < 20; i++) {
@@ -319,6 +331,7 @@ public class Ball {
 			this.dy = 0;
 			this.dx = 0;
 			if (isInHole(gh)) {
+				SoundManager.playHole();
 				if (frame != null) {
 					for (int i = 0; i < 100; i++) {
 						BufferedImage effectImage = new BufferedImage(30, 30,
@@ -468,6 +481,7 @@ public class Ball {
 			}
 			if (pos >= 0) {
 				this.combo[pos] = true;
+				SoundManager.playCombo(pos);
 				System.out.println("1 : " + pos);
 				if (comboList.size() >= 12) {
 					code = 0;
@@ -484,6 +498,7 @@ public class Ball {
 					}
 					if (pos >= 0) {
 						this.combo[pos] = true;
+						SoundManager.playCombo(pos);
 						System.out.println("2 : " + pos);
 					}
 				}

@@ -58,6 +58,7 @@ public class HoleManage {
 		this.effect = effect;
 		scb = new JFrame();
 		scb.setUndecorated(true);
+		scb.setAlwaysOnTop(true);
 		update();
 		scb.setVisible(true);
 		frame.toFront();
@@ -81,12 +82,27 @@ public class HoleManage {
 		label.setBackground(new Color(255, 100, 100));
 		label.setForeground(new Color(255, 255, 255));
 		c.add(label, BorderLayout.NORTH);
+		JPanel infoPanel = new JPanel(new BorderLayout());
+		infoPanel.setOpaque(true);
+		infoPanel.setBackground(new Color(30, 30, 30));
+
 		label = new JLabel("Shot : " + (currentHoleTurn));
 		label.setFont(new Font("Arial", Font.BOLD, 30));
 		label.setOpaque(true);
 		label.setBackground(new Color(100, 200, 100));
 		label.setForeground(new Color(255, 255, 255));
-		c.add(label, BorderLayout.CENTER);
+		infoPanel.add(label, BorderLayout.NORTH);
+
+		JLabel comboGuide = new JLabel("<html><b>Combos after 2nd SPACE:</b><br>"
+				+ Ball.COMBO_NAMES[0] + ": " + Ball.COMBO_INPUTS[0] + "<br>"
+				+ Ball.COMBO_NAMES[1] + ": " + Ball.COMBO_INPUTS[1]
+				+ "<br><i>Release an arrow before pressing it again.</i></html>");
+		comboGuide.setFont(new Font("Arial", Font.PLAIN, 14));
+		comboGuide.setOpaque(true);
+		comboGuide.setBackground(new Color(30, 30, 30));
+		comboGuide.setForeground(new Color(255, 255, 255));
+		infoPanel.add(comboGuide, BorderLayout.CENTER);
+		c.add(infoPanel, BorderLayout.CENTER);
 		JPanel panel = new JPanel();
 		panel.setLayout(new BorderLayout());
 		panel.setOpaque(true);
