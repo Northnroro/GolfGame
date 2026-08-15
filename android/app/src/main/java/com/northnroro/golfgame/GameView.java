@@ -634,7 +634,7 @@ public final class GameView extends View {
     }
 
     private void spawnBallEffects(BallState ball) {
-        if (ball.shootingStar) {
+        if (ball.specialShot == SpecialShot.TOMAHAWK) {
             for (int i = 0; i < 2; i++) {
                 particles.add(new Particle(ball.x, ball.y,
                         random.nextDouble() * 2.5 - 1.25,
@@ -642,7 +642,7 @@ public final class GameView extends View {
                         2f + random.nextFloat() * 4f, 0xFFFFE066, 900, false));
             }
         }
-        if (ball.tornado) {
+        if (ball.specialShot == SpecialShot.COBRA || ball.specialShot == SpecialShot.SPIKE) {
             particles.add(new Particle(ball.x, ball.y,
                     random.nextDouble() * 3.0 - 1.5,
                     random.nextDouble() * 3.0 - 1.5, 0.0,
