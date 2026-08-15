@@ -30,8 +30,11 @@ final class PlayerState {
         if (spriteSheet == null)
             throw new IOException("Cannot load player sprite " + number);
     }
-    void plantGolferAtBall() {
-        golferX = ball.x;
+    void plantGolferAtBall(double aimAngleDegrees) {
+        // Stand behind the ball instead of occupying the same point. The golfer
+        // stays planted here during flight while only the ball travels.
+        double direction = Math.cos(Math.toRadians(aimAngleDegrees)) >= 0.0 ? -1.0 : 1.0;
+        golferX = ball.x + direction * 24.0;
         golferY = ball.y;
     }
 

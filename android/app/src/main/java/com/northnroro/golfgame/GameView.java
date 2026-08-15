@@ -10,6 +10,7 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.os.SystemClock;
+import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -40,6 +41,7 @@ public final class GameView extends View {
     private final ArrayList<Integer> comboInput = new ArrayList<>();
     private final boolean[] keyDown = new boolean[4];
     private final AndroidSound sound;
+    private final float density;
     private final Course[] courses = new Course[3];
 
     private Bitmap titleBg;
@@ -103,6 +105,7 @@ public final class GameView extends View {
         requestFocus();
         textPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
         sound = new AndroidSound(context);
+        density = context.getResources().getDisplayMetrics().density;
         try {
             loadMenuAssets(context);
             for (int i = 0; i < courses.length; i++)
@@ -300,7 +303,7 @@ public final class GameView extends View {
         Course course = courses[currentHole];
         for (PlayerState player : players) {
             player.ball.reset(course.startX, course.startY);
-            player.plantGolferAtBall();
+            player.plantGolferAtBall(angleDegrees);
             player.animationFrame = 0;
         }
         randomizeWind();
@@ -432,7 +435,47 @@ public final class GameView extends View {
         if (screen == Screen.PLAYING && meterActive && powerLocked
                 && !currentPlayer().cpu && comboInput.size() < 12) {
             comboInput.add(direction);
+            queuedSpecial = PangyaMechanics.decodeSpecial(comboInput, lockedPower);
         }
+    }
+
+    private void queueSpecial(SpecialShot special) {
+        if (!meterActive || !powerLocked || flying)
+            return;
+        comboInput.clear();
+        switch (special) {
+        case TOMAHAWK:
+            if (lockedPower < PangyaMechanics.SPECIAL_MIN_POWER) {
+                showPopup("TOMAHAWK needs 80%+ power", 700);
+                return;
+            }
+            comboInput.add(0); comboInput.add(2);
+            break;
+        case COBRA:
+            if (lockedPower < PangyaMechanics.SPECIAL_MIN_POWER) {
+                showPopup("COBRA needs 80%+ power", 700);
+                return;
+            }
+            comboInput.add(1); comboInput.add(0);
+            break;
+        case SPIKE:
+            if (lockedPower < PangyaMechanics.SPECIAL_MIN_POWER) {
+                showPopup("SPIKE needs 80%+ power", 700);
+                return;
+            }
+            comboInput.add(1); comboInput.add(2);
+            break;
+        case TOPSPIN:
+            comboInput.add(0);
+            break;
+        case BACKSPIN:
+            comboInput.add(2);
+            break;
+        default:
+            return;
+        }
+        queuedSpecial = special;
+        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
     }
 
     private void launchShot() {
@@ -487,7 +530,7 @@ public final class GameView extends View {
 
         if (result == BallState.Result.OUT_OF_BOUNDS) {
             player.ball.reset(course.startX, course.startY);
-            player.plantGolferAtBall();
+            player.plantGolferAtBall(angleDegrees);
             showPopup("OUT OF BOUNDS", 1000);
         } else if (result == BallState.Result.HOLED) {
             int relative = currentShot - course.par;
@@ -495,7 +538,7 @@ public final class GameView extends View {
             showPopup(player.label() + "  " + scoreName(relative, currentShot), 1300);
             spawnCelebration(player.ball.x, player.ball.y);
         } else {
-            player.plantGolferAtBall();
+            player.plantGolferAtBall(angleDegrees);
         }
 
         if (allPlayersHoled()) {
@@ -820,7 +863,8 @@ public final class GameView extends View {
 
         String status = !powerLocked
                 ? "SHOT 2: lock POWER"
-                : "SHOT 3: hit the white PANGYA bar   POWER " + Math.round(lockedPower * 100) + "%";
+                : "Choose SPECIAL (optional), then SHOT 3 on white PANGYA bar   POWER "
+                        + Math.round(lockedPower * 100) + "%";
         drawSmallLabel(canvas, status, 96, 518, Color.WHITE);
         if (!comboInput.isEmpty())
             drawSmallLabel(canvas, "Command: " + comboSequenceText(), 430, 542, 0xFFFFE57D);
@@ -897,8 +941,8 @@ public final class GameView extends View {
         float r = controlRadius();
         float dcx = dpadCenterX(r);
         float dcy = dpadCenterY(r);
-        float step = r * 0.92f;
-        float br = r * 0.46f;
+        float step = r * 1.03f;
+        float br = r * 0.70f;
         drawCircleButton(canvas, dcx, dcy - step, br, "↑", heldDirection == 0);
         drawCircleButton(canvas, dcx + step, dcy, br, "→", heldDirection == 1);
         drawCircleButton(canvas, dcx, dcy + step, br, "↓", heldDirection == 2);
@@ -906,9 +950,60 @@ public final class GameView extends View {
 
         float scx = shotCenterX(r);
         float scy = dcy;
-        drawCircleButton(canvas, scx, scy, r * 0.78f,
+        drawCircleButton(canvas, scx, scy, r * 0.98f,
                 powerLocked ? "IMPACT" : "SHOT", false);
+        if (meterActive && powerLocked)
+            drawSpecialButtons(canvas);
         drawMenuButton(canvas);
+    }
+
+    private void drawSpecialButtons(Canvas canvas) {
+        String[] labels = { "TOMA", "COBRA", "SPIKE", "TOP", "BACK" };
+        for (int i = 0; i < labels.length; i++) {
+            RectF rect = specialButtonRect(i);
+            boolean active = (i == 0 && queuedSpecial == SpecialShot.TOMAHAWK)
+                    || (i == 1 && queuedSpecial == SpecialShot.COBRA)
+                    || (i == 2 && queuedSpecial == SpecialShot.SPIKE)
+                    || (i == 3 && queuedSpecial == SpecialShot.TOPSPIN)
+                    || (i == 4 && queuedSpecial == SpecialShot.BACKSPIN);
+            boolean powerOk = i >= 3 || lockedPower >= PangyaMechanics.SPECIAL_MIN_POWER;
+            paint.setColor(active ? 0xEEFFD54F : (powerOk ? 0xDD273A4F : 0xAA343434));
+            canvas.drawRoundRect(rect, 18f * density, 18f * density, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(2f, 1.5f * density));
+            paint.setColor(active ? Color.WHITE : 0xFFD7E5F3);
+            canvas.drawRoundRect(rect, 18f * density, 18f * density, paint);
+            paint.setStyle(Paint.Style.FILL);
+            textPaint.setTextAlign(Paint.Align.CENTER);
+            textPaint.setTextSize(Math.max(15f, 5.2f * density));
+            textPaint.setColor(active ? Color.BLACK : Color.WHITE);
+            canvas.drawText(labels[i], rect.centerX(), rect.centerY()
+                    - (textPaint.ascent() + textPaint.descent()) / 2f, textPaint);
+        }
+        textPaint.setTextAlign(Paint.Align.LEFT);
+    }
+
+    private RectF specialButtonRect(int index) {
+        float h = Math.max(50f, 17f * density);
+        float w = Math.max(94f, 31f * density);
+        float gap = Math.max(8f, 3f * density);
+        float total = w * 5f + gap * 4f;
+        float left = Math.max(10f, (getWidth() - total) * 0.5f);
+        float top = Math.max(72f, dpadCenterY(controlRadius()) - controlRadius() * 2.35f);
+        return new RectF(left + index * (w + gap), top, left + index * (w + gap) + w, top + h);
+    }
+
+    private int specialAt(float x, float y) {
+        if (!meterActive || !powerLocked)
+            return -1;
+        for (int i = 0; i < 5; i++) {
+            RectF r = specialButtonRect(i);
+            float pad = Math.max(5f, 2f * density);
+            if (x >= r.left - pad && x <= r.right + pad
+                    && y >= r.top - pad && y <= r.bottom + pad)
+                return i;
+        }
+        return -1;
     }
 
     private void drawCircleButton(Canvas canvas, float cx, float cy, float radius,
@@ -995,11 +1090,12 @@ public final class GameView extends View {
     }
 
     private float controlRadius() {
-        return Math.max(44f, Math.min(72f, getHeight() * 0.075f));
+        // Keep touch targets physically large on high-density phones.
+        return Math.max(86f, Math.min(getHeight() * 0.135f, 50f * density));
     }
 
     private float dpadCenterY(float r) {
-        return getHeight() - r * 1.65f;
+        return getHeight() - r * 1.72f;
     }
 
     private float dpadCenterX(float r) {
@@ -1090,6 +1186,14 @@ public final class GameView extends View {
             return true;
         }
 
+        int specialIndex = specialAt(x, y);
+        if (specialIndex >= 0) {
+            SpecialShot[] specials = { SpecialShot.TOMAHAWK, SpecialShot.COBRA,
+                    SpecialShot.SPIKE, SpecialShot.TOPSPIN, SpecialShot.BACKSPIN };
+            queueSpecial(specials[specialIndex]);
+            return true;
+        }
+
         int direction = directionAt(x, y);
         if (direction >= 0) {
             if (heldDirection != direction && meterActive && powerLocked)
@@ -1098,6 +1202,7 @@ public final class GameView extends View {
             return true;
         }
         if (shotAt(x, y)) {
+            performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
             pressShot();
             return true;
         }
@@ -1156,8 +1261,8 @@ public final class GameView extends View {
         float r = controlRadius();
         float cx = dpadCenterX(r);
         float cy = dpadCenterY(r);
-        float step = r * 0.92f;
-        float br = r * 0.62f;
+        float step = r * 1.03f;
+        float br = r * 0.84f;
         if (distance(x, y, cx, cy - step) <= br)
             return 0;
         if (distance(x, y, cx + step, cy) <= br)
@@ -1171,7 +1276,7 @@ public final class GameView extends View {
 
     private boolean shotAt(float x, float y) {
         float r = controlRadius();
-        return distance(x, y, shotCenterX(r), dpadCenterY(r)) <= r * 0.92f;
+        return distance(x, y, shotCenterX(r), dpadCenterY(r)) <= r * 1.12f;
     }
 
     private static float distance(float ax, float ay, float bx, float by) {
