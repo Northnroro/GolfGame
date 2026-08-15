@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 17 x64
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -32,8 +32,9 @@ jobs:
       - name: Copy runtime resources
         shell: pwsh
         run: |
+          $srcRoot = (Resolve-Path src).Path
           Get-ChildItem -Path src -Recurse -File | Where-Object { $_.Extension -ne '.java' -and $_.Extension -ne '.class' } | ForEach-Object {
-            $relative = $_.FullName.Substring((Resolve-Path src).Path.Length).TrimStart('\\','/')
+            $relative = [System.IO.Path]::GetRelativePath($srcRoot, $_.FullName)
             $target = Join-Path 'build/classes' $relative
             New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
             Copy-Item $_.FullName $target -Force
@@ -63,7 +64,8 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path 'build/package/GolfGame/GolfGame.exe')) { throw 'GolfGame.exe was not created.' }
-          Get-ChildItem 'build/package/GolfGame' -Recurse | Select-Object FullName, Length
+          Get-Item 'build/package/GolfGame/GolfGame.exe' | Format-List FullName,Length
+          Get-Item 'build/package/GolfGame/runtime/bin/server/jvm.dll' | Format-List FullName,Length
 
       - name: Zip portable game
         shell: pwsh
