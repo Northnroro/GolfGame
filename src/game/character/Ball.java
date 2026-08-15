@@ -78,7 +78,7 @@ public class Ball {
 			double bounceImpact = Math.abs(dy);
 			long now = System.currentTimeMillis();
 			if (bounceImpact > 1.2 && now - lastBounceSoundMs > 180) {
-				SoundManager.playBounce(bounceImpact);
+				SoundManager.playBounce(fric, bounceImpact);
 				lastBounceSoundMs = now;
 			}
 			currSpeed *= fric;
@@ -247,6 +247,7 @@ public class Ball {
 			}
 		}
 		if (getY() > gh.getCurrentTerrain().getHeight() + 10) {
+			SoundManager.playWater(Math.hypot(dx, dy));
 
 			if (frame != null) {
 				for (int i = 0; i < 200; i++) {

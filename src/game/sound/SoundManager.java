@@ -1,75 +1,95 @@
 package game.sound;
 
-import javax.sound.sampled.AudioFormat;
+import java.io.BufferedInputStream;
+import java.io.InputStream;
+import java.util.concurrent.ThreadLocalRandom;
+
+import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.SourceDataLine;
+import javax.sound.sampled.Clip;
+import javax.sound.sampled.FloatControl;
+import javax.sound.sampled.LineEvent;
+import javax.sound.sampled.LineListener;
 
 public final class SoundManager {
-    private static final float SAMPLE_RATE = 22050.0f;
+    private static final String[] CLUB_HITS = variants("club_hit", 3);
+    private static final String[] GRASS_HITS = variants("grass", 3);
+    private static final String[] ICE_HITS = variants("ice", 3);
+    private static final String[] SAND_HITS = variants("sand", 3);
+    private static final String[] WATER_HITS = variants("water", 3);
+    private static final String[] HOLE_HITS = variants("hole", 3);
 
     private SoundManager() {
     }
 
     public static void playClick() {
-        playSweep(880.0, 660.0, 55, 0.16);
+        play("assets/menu_click.wav", 0.55);
     }
 
     public static void playShot(double power) {
-        double p = Math.max(0.0, Math.min(1.0, power));
-        playSweep(260.0 + p * 120.0, 90.0, 180, 0.18 + p * 0.12);
+        double p = clamp(power, 0.0, 1.0);
+        playRandom(CLUB_HITS, 0.45 + p * 0.55);
     }
 
-    public static void playBounce(double speed) {
-        double s = Math.max(0.0, Math.min(15.0, speed));
-        playSweep(130.0 + s * 16.0, 75.0, 80,
-                Math.min(0.24, 0.08 + s * 0.012));
-    }
+    public static void playBounce(double friction, double speed) {
+        if (speed < 0.55)
+            return;
 
-    public static void playHole() {
-        playNotes(new double[] { 523.25, 659.25, 783.99, 1046.50 },
-                new int[] { 90, 90, 110, 220 }, 0.20);
-    }
-
-    public static void playCombo(int comboIndex) {
-        if (comboIndex == 0) {
-            playNotes(new double[] { 440.0, 659.25, 880.0 },
-                    new int[] { 70, 70, 150 }, 0.16);
+        double volume = clamp(0.18 + speed / 9.0, 0.18, 1.0);
+        if (friction <= 0.15) {
+            playRandom(SAND_HITS, volume * 0.72);
+        } else if (friction >= 0.80) {
+            playRandom(ICE_HITS, volume);
         } else {
-            playSweep(300.0, 900.0, 260, 0.14);
+            playRandom(GRASS_HITS, volume * 0.82);
         }
     }
 
-    private static void playSweep(final double startHz, final double endHz,
-            final int durationMs, final double volume) {
-        runAsync(new Runnable() {
-            @Override
-            public void run() {
-                writeSweep(startHz, endHz, durationMs, volume);
-            }
-        });
+    public static void playWater(double speed) {
+        playRandom(WATER_HITS, clamp(0.35 + speed / 12.0, 0.35, 1.0));
     }
 
-    private static void playNotes(final double[] frequencies,
-            final int[] durationsMs, final double volume) {
-        runAsync(new Runnable() {
-            @Override
-            public void run() {
-                for (int i = 0; i < frequencies.length; i++) {
-                    writeSweep(frequencies[i], frequencies[i],
-                            durationsMs[i], volume);
-                }
-            }
-        });
+    public static void playHole() {
+        playRandom(HOLE_HITS, 0.92);
     }
 
-    private static void runAsync(final Runnable sound) {
+    public static void playCombo(int comboIndex) {
+        play("assets/combo.wav", comboIndex == 0 ? 0.78 : 0.88);
+    }
+
+    private static void playRandom(String[] paths, double volume) {
+        int index = ThreadLocalRandom.current().nextInt(paths.length);
+        play(paths[index], volume);
+    }
+
+    private static void play(final String resource, final double volume) {
         Thread thread = new Thread(new Runnable() {
             @Override
             public void run() {
+                Clip clip = null;
                 try {
-                    sound.run();
+                    InputStream raw = SoundManager.class.getResourceAsStream(resource);
+                    if (raw == null)
+                        return;
+                    AudioInputStream audio = AudioSystem.getAudioInputStream(
+                            new BufferedInputStream(raw));
+                    clip = AudioSystem.getClip();
+                    final Clip autoClose = clip;
+                    clip.addLineListener(new LineListener() {
+                        @Override
+                        public void update(LineEvent event) {
+                            if (event.getType() == LineEvent.Type.STOP) {
+                                autoClose.close();
+                            }
+                        }
+                    });
+                    clip.open(audio);
+                    audio.close();
+                    setVolume(clip, volume);
+                    clip.start();
                 } catch (Throwable ignored) {
-                    // Audio is optional: never crash when no output device exists.
+                    if (clip != null)
+                        clip.close();
                 }
             }
         }, "GolfGame-Sound");
@@ -77,40 +97,24 @@ public final class SoundManager {
         thread.start();
     }
 
-    private static void writeSweep(double startHz, double endHz,
-            int durationMs, double volume) {
-        SourceDataLine line = null;
-        try {
-            AudioFormat format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
-            line = AudioSystem.getSourceDataLine(format);
-            line.open(format);
-            line.start();
+    private static void setVolume(Clip clip, double volume) {
+        if (!clip.isControlSupported(FloatControl.Type.MASTER_GAIN))
+            return;
+        FloatControl gain = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
+        double safe = clamp(volume, 0.01, 1.0);
+        float db = (float) (20.0 * Math.log10(safe));
+        gain.setValue(Math.max(gain.getMinimum(), Math.min(gain.getMaximum(), db)));
+    }
 
-            int samples = Math.max(1,
-                    (int) (SAMPLE_RATE * durationMs / 1000.0));
-            byte[] data = new byte[samples * 2];
-            double phase = 0.0;
-
-            for (int i = 0; i < samples; i++) {
-                double t = samples == 1 ? 0.0 : (double) i / (samples - 1);
-                double hz = startHz + (endHz - startHz) * t;
-                phase += 2.0 * Math.PI * hz / SAMPLE_RATE;
-                double envelope = Math.sin(Math.PI * t);
-                short sample = (short) (Math.sin(phase) * envelope * volume
-                        * Short.MAX_VALUE);
-                data[i * 2] = (byte) (sample & 0xff);
-                data[i * 2 + 1] = (byte) ((sample >>> 8) & 0xff);
-            }
-
-            line.write(data, 0, data.length);
-            line.drain();
-        } catch (Exception ignored) {
-            // Java Sound can be unavailable on some systems; stay silent.
-        } finally {
-            if (line != null) {
-                line.stop();
-                line.close();
-            }
+    private static String[] variants(String stem, int count) {
+        String[] out = new String[count];
+        for (int i = 0; i < count; i++) {
+            out[i] = "assets/" + stem + "_" + (i + 1) + ".wav";
         }
+        return out;
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
 }
