@@ -22,13 +22,16 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 
+import game.core.PangyaMechanics;
+import game.core.PangyaMechanics.SpecialShot;
+
 public final class GameView extends View {
     private static final float BASE_W = 800f;
     private static final float BASE_H = 600f;
-    private static final String[] COMBO_NAMES = { "Shooting Star", "Tornado" };
-    private static final String[] COMBO_TEXT = { "← → ↓ ↑ ↓ ↓", "↑ ↓ ← → ↑ ↑" };
+    private static final String[] SPECIAL_NAMES = { "Tomahawk", "Cobra", "Spike" };
+    private static final String[] SPECIAL_TEXT = { "↑ ↓", "→ ↑", "→ ↓" };
 
-    private enum Screen { TITLE, HOW_TO, CREDITS, PLAYING, FINISHED }
+    private enum Screen { TITLE, STAGE_SELECT, HOW_TO, CREDITS, PLAYING, FINISHED }
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -67,8 +70,13 @@ public final class GameView extends View {
     private boolean cpuMeterControl;
     private double meter;
     private double lockedPower;
+    private double impactMeter;
     private double cpuTargetPower;
     private double angleDegrees = -45.0;
+    private double windSpeed;
+    private double windAngleDegrees;
+    private SpecialShot queuedSpecial = SpecialShot.NORMAL;
+    private String shotFeedback = "";
     private long cpuActionAt;
     private double physicsAccumulatorMs;
 
@@ -164,6 +172,9 @@ public final class GameView extends View {
         case TITLE:
             drawTitle(canvas);
             break;
+        case STAGE_SELECT:
+            drawStageSelect(canvas);
+            break;
         case HOW_TO:
             drawHowTo(canvas);
             break;
@@ -196,8 +207,44 @@ public final class GameView extends View {
         canvas.drawBitmap(startButton, 340, 260, paint);
         canvas.drawBitmap(howToButton, 355, 340, paint);
         canvas.drawBitmap(creditsButton, 355, 410, paint);
-        drawSmallLabel(canvas, "Android native port", 18, 575, Color.WHITE);
+        drawSmallLabel(canvas, "Android + Windows shared mechanics core", 18, 575, Color.WHITE);
         canvas.restore();
+    }
+
+    private void drawStageSelect(Canvas canvas) {
+        canvas.save();
+        enterBase(canvas);
+        drawFullScreenBitmap(canvas, titleBg);
+        paint.setColor(0xB9000000);
+        canvas.drawRect(0, 0, BASE_W, BASE_H, paint);
+        textPaint.setTextAlign(Paint.Align.CENTER);
+        textPaint.setTextSize(38f);
+        textPaint.setColor(0xFFFFE278);
+        canvas.drawText("SELECT COURSE", 400, 82, textPaint);
+        textPaint.setTextAlign(Paint.Align.LEFT);
+        for (int i = 0; i < courses.length; i++) {
+            RectF card = stageCard(i);
+            paint.setColor(0xDD151A24);
+            canvas.drawRoundRect(card, 18, 18, paint);
+            Rect src = new Rect(0, 0, courses[i].background.getWidth(), courses[i].background.getHeight());
+            RectF image = new RectF(card.left + 8, card.top + 8, card.right - 8, card.top + 178);
+            canvas.save();
+            canvas.clipRect(image);
+            canvas.drawBitmap(courses[i].background, src, image, paint);
+            canvas.restore();
+            drawSmallLabel(canvas, "HOLE " + (i + 1), card.left + 16, card.top + 210, 0xFFFFE278);
+            drawSmallLabel(canvas, "PAR " + courses[i].par, card.left + 16, card.top + 238, Color.WHITE);
+            drawSmallLabel(canvas, "Tap to play", card.left + 16, card.top + 274, 0xFFBBD7F5);
+        }
+        canvas.drawBitmap(homeButton, 700, 10, paint);
+        canvas.restore();
+    }
+
+    private RectF stageCard(int index) {
+        float w = 220f;
+        float gap = 25f;
+        float left = 45f + index * (w + gap);
+        return new RectF(left, 125f, left + w, 430f);
     }
 
     private void drawHowTo(Canvas canvas) {
@@ -207,10 +254,10 @@ public final class GameView extends View {
         canvas.drawBitmap(howToFg, 0, 0, paint);
         canvas.drawBitmap(homeButton, 700, 10, paint);
         drawPanel(canvas, 18, 485, 560, 98, 0xCC111111);
-        drawSmallLabel(canvas, "Android: D-pad = aim / combo, SHOT = Space", 32, 515, Color.WHITE);
-        drawSmallLabel(canvas, "Tap SHOT once to start meter, again to lock power; then enter combo.",
+        drawSmallLabel(canvas, "PangYa shot: SHOT → lock POWER → SHOT on IMPACT zone", 32, 515, Color.WHITE);
+        drawSmallLabel(canvas, "Return meter: ↑↓ Toma, →↑ Cobra, →↓ Spike; ↑/↓ spin, ←/→ curve.",
                 32, 542, Color.WHITE);
-        drawSmallLabel(canvas, "Drag the course while idle to look around. Keyboard/controller also works.",
+        drawSmallLabel(canvas, "Wind arrow affects the same physics used by trajectory preview.",
                 32, 569, Color.WHITE);
         canvas.restore();
     }
@@ -225,20 +272,17 @@ public final class GameView extends View {
         canvas.restore();
     }
 
-    private void startGame() {
+    private void startGame(int selectedHole) {
         try {
             if (players != null) {
                 for (PlayerState player : players)
                     player.recycle();
             }
-            players = new PlayerState[] {
-                    new PlayerState(getContext(), 0, false),
-                    new PlayerState(getContext(), 1, false),
-                    new PlayerState(getContext(), 2, true) };
-            currentHole = 0;
+            players = new PlayerState[] { new PlayerState(getContext(), 0, false) };
+            currentHole = selectedHole;
             screen = Screen.PLAYING;
             winnerText = null;
-            gotoHole(0);
+            gotoHole(selectedHole);
         } catch (IOException e) {
             fatalError = e.getMessage();
         }
@@ -256,11 +300,12 @@ public final class GameView extends View {
         Course course = courses[currentHole];
         for (PlayerState player : players) {
             player.ball.reset(course.startX, course.startY);
+            player.plantGolferAtBall();
             player.animationFrame = 0;
         }
+        randomizeWind();
         centerCameraOn(players[0].ball, true);
-        scheduleCpuIfNeeded();
-        showPopup("Hole " + (currentHole + 1) + " / " + courses.length, 1200);
+        showPopup("Hole " + (currentHole + 1) + "  •  Wind " + Math.round(windSpeed) + "m", 1200);
     }
 
     private void updateGame(double dtMs) {
@@ -289,7 +334,8 @@ public final class GameView extends View {
             while (physicsAccumulatorMs >= 10.0 && flying && safety++ < 8) {
                 physicsAccumulatorMs -= 10.0;
                 BallState ball = currentPlayer().ball;
-                BallState.Result result = ball.update(courses[currentHole], sound, angleDegrees);
+                BallState.Result result = ball.update(courses[currentHole], sound, angleDegrees,
+                        windSpeed, windAngleDegrees);
                 spawnBallEffects(ball);
                 if (result != BallState.Result.MOVING)
                     finishShot(result);
@@ -317,6 +363,9 @@ public final class GameView extends View {
         cpuMeterControl = cpuControlled;
         meter = 0.0;
         lockedPower = 0.0;
+        impactMeter = 0.0;
+        queuedSpecial = SpecialShot.NORMAL;
+        shotFeedback = "";
         comboInput.clear();
     }
 
@@ -327,27 +376,44 @@ public final class GameView extends View {
         cpuMeterControl = false;
         meter = 0.0;
         lockedPower = 0.0;
+        impactMeter = 0.0;
+        queuedSpecial = SpecialShot.NORMAL;
+        shotFeedback = "";
         comboInput.clear();
     }
 
     private void updateMeter(double dt) {
-        double speed = meterForward ? 1.18 : 1.05;
+        double speed = powerLocked ? 0.92 : 1.12;
         meter += (meterForward ? 1 : -1) * speed * dt;
         if (cpuMeterControl && !powerLocked && meter >= cpuTargetPower) {
-            powerLocked = true;
-            lockedPower = Math.max(0.08, Math.min(1.0, meter));
+            lockPower();
         }
         if (meter >= 1.0) {
             meter = 1.0;
-            meterForward = false;
+            if (!powerLocked) meterForward = false;
         }
         if (meter <= 0.0) {
             meter = 0.0;
-            if (powerLocked)
-                launchShot();
-            else
-                cancelMeter();
+            if (powerLocked) commitImpact(0.0, true);
+            else cancelMeter();
         }
+    }
+
+    private void lockPower() {
+        powerLocked = true;
+        lockedPower = Math.max(0.08, Math.min(1.0, meter));
+        meterForward = false;
+    }
+
+    private void commitImpact(double position, boolean timedOut) {
+        impactMeter = Math.max(0.0, Math.min(1.0, position));
+        if (PangyaMechanics.isPangya(impactMeter))
+            shotFeedback = "PANGYA!";
+        else if (PangyaMechanics.isInsideImpactZone(impactMeter))
+            shotFeedback = "IMPACT";
+        else
+            shotFeedback = timedOut ? "LATE / BAD SHOT" : "HOOK / SLICE";
+        launchShot();
     }
 
     private void pressShot() {
@@ -356,8 +422,9 @@ public final class GameView extends View {
         if (!meterActive) {
             startMeter(false);
         } else if (!powerLocked) {
-            powerLocked = true;
-            lockedPower = Math.max(0.08, Math.min(1.0, meter));
+            lockPower();
+        } else {
+            commitImpact(meter, false);
         }
     }
 
@@ -371,8 +438,10 @@ public final class GameView extends View {
     private void launchShot() {
         PlayerState player = currentPlayer();
         double power = Math.max(0.08, Math.min(1.0, lockedPower));
-        player.ball.launch(angleDegrees, power, comboInput, sound);
+        queuedSpecial = PangyaMechanics.decodeSpecial(comboInput, power);
+        player.ball.launch(angleDegrees, power, impactMeter, comboInput, sound);
         sound.shot(power);
+        showPopup(shotFeedback + (queuedSpecial == SpecialShot.NORMAL ? "" : "  •  " + queuedSpecial), 850);
         player.animationFrame = 2;
         flying = true;
         physicsAccumulatorMs = 0;
@@ -418,20 +487,19 @@ public final class GameView extends View {
 
         if (result == BallState.Result.OUT_OF_BOUNDS) {
             player.ball.reset(course.startX, course.startY);
+            player.plantGolferAtBall();
             showPopup("OUT OF BOUNDS", 1000);
         } else if (result == BallState.Result.HOLED) {
             int relative = currentShot - course.par;
             player.recordScore(currentHole, relative);
             showPopup(player.label() + "  " + scoreName(relative, currentShot), 1300);
             spawnCelebration(player.ball.x, player.ball.y);
+        } else {
+            player.plantGolferAtBall();
         }
 
         if (allPlayersHoled()) {
-            if (currentHole + 1 >= courses.length) {
-                finishGame();
-            } else {
-                gotoHole(currentHole + 1);
-            }
+            finishGame();
             return;
         }
         advanceTurn();
@@ -469,10 +537,16 @@ public final class GameView extends View {
             if (player.totalScore() < winner.totalScore())
                 winner = player;
         }
-        winnerText = winner.label() + " wins!  Total " + formatScore(winner.totalScore());
+        winnerText = "HOLE " + (currentHole + 1) + " COMPLETE  •  "
+                + formatScore(winner.totalScore());
         screen = Screen.FINISHED;
         flying = false;
         cancelMeter();
+    }
+
+    private void randomizeWind() {
+        windSpeed = 1.0 + random.nextInt(9);
+        windAngleDegrees = random.nextInt(360);
     }
 
     private static String scoreName(int relative, int strokes) {
@@ -618,11 +692,17 @@ public final class GameView extends View {
 
         canvas.save();
         canvas.translate((float) -camX, (float) -camY);
+        drawTerrainDepthLayer(canvas, course, 0.975f, 110);
+        drawTerrainDepthLayer(canvas, course, 0.988f, 150);
+        paint.setAlpha(255);
         canvas.drawBitmap(course.terrain, 0, 0, paint);
         drawTrajectory(canvas, course);
         drawWorldParticles(canvas);
         drawCurrentGolfer(canvas);
         drawBalls(canvas);
+        drawTerrainDepthLayer(canvas, course, 1.012f, 80);
+        drawTerrainDepthLayer(canvas, course, 1.025f, 48);
+        paint.setAlpha(255);
         canvas.restore();
 
         drawMeter(canvas);
@@ -631,6 +711,17 @@ public final class GameView extends View {
 
         drawTouchControls(canvas);
         drawPopup(canvas);
+    }
+
+    private void drawTerrainDepthLayer(Canvas canvas, Course course, float scale, int alpha) {
+        float px = (float) (camX + BASE_W * 0.5);
+        float py = (float) (camY + BASE_H * 0.5);
+        canvas.save();
+        canvas.scale(scale, scale, px, py);
+        paint.setAlpha(alpha);
+        canvas.drawBitmap(course.terrain, 0, 0, paint);
+        paint.setAlpha(255);
+        canvas.restore();
     }
 
     private void drawCourseBackground(Canvas canvas, Course course) {
@@ -652,7 +743,8 @@ public final class GameView extends View {
                 BallState.MAX_SPEED * previewPower * Math.sin(a));
         paint.setColor(0x99FFFFFF);
         for (int i = 0; i < 180; i++) {
-            BallState.Result result = preview.update(course, null, angleDegrees);
+            BallState.Result result = preview.update(course, null, angleDegrees,
+                    windSpeed, windAngleDegrees);
             if (i % 6 == 0)
                 canvas.drawCircle((float) preview.x, (float) preview.y, 3f, paint);
             if (result != BallState.Result.MOVING)
@@ -676,8 +768,8 @@ public final class GameView extends View {
         frame = Math.max(0, Math.min(3, frame));
         Rect src = new Rect(frame * frameWidth, 0,
                 (frame + 1) * frameWidth, player.spriteSheet.getHeight());
-        float left = (float) player.ball.x - frameWidth / 2f;
-        float top = (float) player.ball.y - player.spriteSheet.getHeight();
+        float left = (float) player.golferX - frameWidth / 2f;
+        float top = (float) player.golferY - player.spriteSheet.getHeight();
         RectF dst = new RectF(left, top, left + frameWidth,
                 top + player.spriteSheet.getHeight());
         canvas.drawBitmap(player.spriteSheet, src, dst, paint);
@@ -700,22 +792,38 @@ public final class GameView extends View {
     private void drawMeter(Canvas canvas) {
         if (!meterActive)
             return;
-        drawPanel(canvas, 70, 495, 660, 92, 0xD9222840);
+        drawPanel(canvas, 70, 488, 660, 102, 0xD9222840);
+        final float x0 = 100f, width = 600f, y0 = 548f, y1 = 570f;
         paint.setColor(0xFF07132D);
-        canvas.drawRoundRect(new RectF(98, 548, 702, 570), 11, 11, paint);
-        paint.setColor(powerLocked ? 0xFFFFD45A : 0xFF8FD4FF);
-        canvas.drawRoundRect(new RectF(100, 550,
-                100 + (float) (600.0 * meter), 568), 9, 9, paint);
-        paint.setColor(0xFFFFFFFF);
-        float markerX = 100 + (float) (600.0 * meter);
-        canvas.drawRect(markerX - 3, 543, markerX + 3, 575, paint);
+        canvas.drawRoundRect(new RectF(x0 - 2, y0 - 2, x0 + width + 2, y1 + 2), 11, 11, paint);
 
-        String status = powerLocked
-                ? "POWER LOCKED  " + Math.round(lockedPower * 100) + "%  • Enter combo now"
-                : "Tap SHOT again to lock power";
-        drawSmallLabel(canvas, status, 96, 522, Color.WHITE);
+        float impactCenter = x0 + (float) (width * PangyaMechanics.IMPACT_CENTER);
+        float pinkHalf = (float) (width * PangyaMechanics.IMPACT_ZONE_HALF_WIDTH);
+        paint.setColor(0xFFE867B5);
+        canvas.drawRect(impactCenter - pinkHalf, y0, impactCenter + pinkHalf, y1, paint);
+        float whiteHalf = Math.max(2f, (float) (width * PangyaMechanics.PANGYA_HALF_WIDTH));
+        paint.setColor(Color.WHITE);
+        canvas.drawRect(impactCenter - whiteHalf, y0 - 4, impactCenter + whiteHalf, y1 + 4, paint);
+
+        float powerEnd = x0 + (float) (width * (powerLocked ? lockedPower : meter));
+        paint.setColor(powerLocked ? 0x66FFD45A : 0x998FD4FF);
+        canvas.drawRect(x0, y0 + 4, powerEnd, y1 - 4, paint);
+
+        if (powerLocked) {
+            float lockedX = x0 + (float) (width * lockedPower);
+            paint.setColor(0xFFFFD45A);
+            canvas.drawRect(lockedX - 3, y0 - 7, lockedX + 3, y1 + 7, paint);
+        }
+        float movingX = x0 + (float) (width * meter);
+        paint.setColor(0xFF75E6FF);
+        canvas.drawRect(movingX - 2, y0 - 8, movingX + 2, y1 + 8, paint);
+
+        String status = !powerLocked
+                ? "SHOT 2: lock POWER"
+                : "SHOT 3: hit the white PANGYA bar   POWER " + Math.round(lockedPower * 100) + "%";
+        drawSmallLabel(canvas, status, 96, 518, Color.WHITE);
         if (!comboInput.isEmpty())
-            drawSmallLabel(canvas, "Input: " + comboSequenceText(), 390, 522, 0xFFFFE57D);
+            drawSmallLabel(canvas, "Command: " + comboSequenceText(), 430, 542, 0xFFFFE57D);
     }
 
     private String comboSequenceText() {
@@ -740,30 +848,35 @@ public final class GameView extends View {
 
     private void drawHud(Canvas canvas) {
         Course course = courses[currentHole];
-        drawPanel(canvas, 10, 10, 400, 146, 0xD9000000);
-        drawSmallLabel(canvas, "HOLE " + (currentHole + 1) + "/" + courses.length
-                + "   PAR " + course.par + "   SHOT " + currentShot,
-                22, 34, Color.WHITE);
-        drawSmallLabel(canvas, "TURN " + currentPlayer().label()
-                + "   ANGLE " + Math.round(angleDegrees) + "°",
+        drawPanel(canvas, 10, 10, 390, 130, 0xD9000000);
+        drawSmallLabel(canvas, "HOLE " + (currentHole + 1) + "   PAR " + course.par
+                + "   SHOT " + currentShot, 22, 34, Color.WHITE);
+        drawSmallLabel(canvas, "ANGLE " + Math.round(angleDegrees) + "°",
                 22, 58, 0xFFFFE278);
+        drawSmallLabel(canvas, "SCORE " + scoreSummary(currentPlayer()),
+                22, 84, Color.WHITE);
+        drawWind(canvas, 302, 72);
 
-        float y = 82;
-        for (int i = 0; i < players.length; i++) {
-            PlayerState player = players[i];
-            int color = i == currentTurn ? 0xFFFFE278 : Color.WHITE;
-            drawSmallLabel(canvas, player.label() + "  " + scoreSummary(player),
-                    22, y, color);
-            y += 22;
-        }
+        drawPanel(canvas, 410, 10, 380, 130, 0xD9222230);
+        drawSmallLabel(canvas, "PANGYA SPECIALS (power ≥80%)", 424, 32, 0xFFFFE278);
+        drawSmallLabel(canvas, SPECIAL_NAMES[0] + "  " + SPECIAL_TEXT[0]
+                + "    " + SPECIAL_NAMES[1] + "  " + SPECIAL_TEXT[1]
+                + "    " + SPECIAL_NAMES[2] + "  " + SPECIAL_TEXT[2],
+                424, 58, Color.WHITE);
+        drawSmallLabel(canvas, "↑ Topspin   ↓ Backspin   ←/→ Curve", 424, 84, 0xFFBBD7F5);
+        drawSmallLabel(canvas, "Commands are entered while the meter returns", 424, 110, 0xFFB8C6D9);
+    }
 
-        drawPanel(canvas, 425, 10, 365, 116, 0xD9222230);
-        drawSmallLabel(canvas, "COMBOS — after 2nd SHOT", 438, 34, 0xFFFFE278);
-        drawSmallLabel(canvas, COMBO_NAMES[0] + ":  " + COMBO_TEXT[0],
-                438, 60, Color.WHITE);
-        drawSmallLabel(canvas, COMBO_NAMES[1] + ":  " + COMBO_TEXT[1],
-                438, 84, Color.WHITE);
-        drawSmallLabel(canvas, "Release/re-tap repeated directions", 438, 108, 0xFFB8C6D9);
+    private void drawWind(Canvas canvas, float cx, float cy) {
+        double r = Math.toRadians(windAngleDegrees);
+        float len = 31f;
+        float ex = cx + (float) Math.cos(r) * len;
+        float ey = cy + (float) Math.sin(r) * len;
+        paint.setColor(0xFF7FE8FF);
+        paint.setStrokeWidth(4f);
+        canvas.drawLine(cx, cy, ex, ey, paint);
+        canvas.drawCircle(ex, ey, 5f, paint);
+        drawSmallLabel(canvas, Math.round(windSpeed) + "m", cx - 16, cy + 40, 0xFF7FE8FF);
     }
 
     private String scoreSummary(PlayerState player) {
@@ -794,7 +907,7 @@ public final class GameView extends View {
         float scx = shotCenterX(r);
         float scy = dcy;
         drawCircleButton(canvas, scx, scy, r * 0.78f,
-                powerLocked ? "COMBO" : "SHOT", false);
+                powerLocked ? "IMPACT" : "SHOT", false);
         drawMenuButton(canvas);
     }
 
@@ -854,7 +967,7 @@ public final class GameView extends View {
                 getWidth() / 2f, getHeight() / 2f - 25f, textPaint);
         textPaint.setTextSize(22f);
         textPaint.setColor(Color.WHITE);
-        canvas.drawText("Tap anywhere to return to the title",
+        canvas.drawText("Tap anywhere to choose another course",
                 getWidth() / 2f, getHeight() / 2f + 30f, textPaint);
         textPaint.setTextAlign(Paint.Align.LEFT);
     }
@@ -960,10 +1073,11 @@ public final class GameView extends View {
     private boolean handleTouchDown(float x, float y) {
         if (screen == Screen.FINISHED) {
             sound.click();
-            screen = Screen.TITLE;
+            screen = Screen.STAGE_SELECT;
             return true;
         }
-        if (screen == Screen.TITLE || screen == Screen.HOW_TO || screen == Screen.CREDITS)
+        if (screen == Screen.TITLE || screen == Screen.STAGE_SELECT
+                || screen == Screen.HOW_TO || screen == Screen.CREDITS)
             return handleMenuTouch(x, y);
         if (screen != Screen.PLAYING)
             return false;
@@ -1004,7 +1118,7 @@ public final class GameView extends View {
         if (screen == Screen.TITLE) {
             if (bx >= 340 && bx <= 779 && by >= 260 && by <= 357) {
                 sound.click();
-                startGame();
+                screen = Screen.STAGE_SELECT;
                 return true;
             }
             if (bx >= 355 && bx <= 725 && by >= 340 && by <= 420) {
@@ -1016,6 +1130,19 @@ public final class GameView extends View {
                 sound.click();
                 screen = Screen.CREDITS;
                 return true;
+            }
+        } else if (screen == Screen.STAGE_SELECT) {
+            if (bx >= 690 && bx <= 800 && by >= 0 && by <= 110) {
+                sound.click();
+                screen = Screen.TITLE;
+                return true;
+            }
+            for (int i = 0; i < courses.length; i++) {
+                if (stageCard(i).contains(bx, by)) {
+                    sound.click();
+                    startGame(i);
+                    return true;
+                }
             }
         } else if (bx >= 690 && bx <= 800 && by >= 0 && by <= 110) {
             sound.click();
@@ -1106,6 +1233,11 @@ public final class GameView extends View {
     boolean handleBack() {
         if (screen == Screen.TITLE)
             return false;
+        if (screen == Screen.STAGE_SELECT) {
+            sound.click();
+            screen = Screen.TITLE;
+            return true;
+        }
         sound.click();
         cancelMeter();
         flying = false;

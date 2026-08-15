@@ -2,90 +2,105 @@ package com.northnroro.golfgame;
 
 import java.util.List;
 
+import game.core.PangyaMechanics;
+import game.core.PangyaMechanics.SpecialShot;
+
 final class BallState {
     static final int SIZE = 11;
     static final double GRAVITY = 0.2;
     static final double MAX_SPEED = 10.0;
     private static final double STOP_DIFFERENCE = 3.5;
-    private static final int[] COMBO_CODES = { 0b110110001010, 0b001011010000 };
 
-    enum Result {
-        MOVING, STOPPED, HOLED, OUT_OF_BOUNDS
-    }
+    enum Result { MOVING, STOPPED, HOLED, OUT_OF_BOUNDS }
 
     double x;
     double y;
     double dx;
     double dy;
-    boolean shootingStar;
-    boolean tornado;
     boolean bouncedThisStep;
     double bounceFriction;
     double bounceImpact;
+    SpecialShot specialShot = SpecialShot.NORMAL;
 
     private double differencePosition;
     private long lastBounceSoundMs;
+    private int flightTicks;
+    private boolean specialLandingApplied;
 
-    BallState() {
-    }
     void reset(double x, double y) {
         this.x = x;
         this.y = y;
         dx = 0;
         dy = 0;
         differencePosition = 999;
-        shootingStar = false;
-        tornado = false;
         bouncedThisStep = false;
+        specialShot = SpecialShot.NORMAL;
+        flightTicks = 0;
+        specialLandingApplied = false;
     }
 
-    void launch(double angleDegrees, double power, List<Integer> comboInput,
-            AndroidSound sound) {
-        double angle = Math.toRadians(angleDegrees);
-        dx = MAX_SPEED * power * Math.cos(angle);
-        dy = MAX_SPEED * power * Math.sin(angle);
-        differencePosition = 999;
-        decodeCombos(comboInput, sound);
-    }
+    void launch(double angleDegrees, double power, double impactMeter,
+            List<Integer> comboInput, AndroidSound sound) {
+        specialShot = PangyaMechanics.decodeSpecial(comboInput, power);
+        double correctedAngle = angleDegrees + PangyaMechanics.hookDegrees(impactMeter);
+        double speed = MAX_SPEED * power * PangyaMechanics.impactPowerMultiplier(impactMeter);
+        double angle = Math.toRadians(correctedAngle);
+        dx = speed * Math.cos(angle);
+        dy = speed * Math.sin(angle);
 
-    private void decodeCombos(List<Integer> input, AndroidSound sound) {
-        shootingStar = false;
-        tornado = false;
-        checkComboBlock(input, 0, sound);
-        if (input.size() >= 12)
-            checkComboBlock(input, 6, sound);
-    }
-
-    private void checkComboBlock(List<Integer> input, int offset, AndroidSound sound) {
-        if (input.size() < offset + 6)
-            return;
-        int code = 0;
-        for (int i = 0; i < 6; i++)
-            code = (code << 2) + input.get(offset + i);
-        for (int i = 0; i < COMBO_CODES.length; i++) {
-            if (code == COMBO_CODES[i]) {
-                if (i == 0)
-                    shootingStar = true;
-                else
-                    tornado = true;
-                if (sound != null)
-                    sound.combo(i);
-            }
+        switch (specialShot) {
+        case TOMAHAWK:
+            dx *= 1.02;
+            dy *= 1.28;
+            break;
+        case COBRA:
+            dx *= 1.08;
+            dy *= 0.38;
+            break;
+        case SPIKE:
+            dx *= 0.98;
+            dy *= 1.42;
+            break;
+        case TOPSPIN:
+            dy *= 0.88;
+            break;
+        case BACKSPIN:
+            dy *= 1.12;
+            break;
+        case CURVE_LEFT:
+            dx *= 0.97;
+            break;
+        case CURVE_RIGHT:
+            dx *= 1.03;
+            break;
+        default:
+            break;
         }
+
+        differencePosition = 999;
+        flightTicks = 0;
+        specialLandingApplied = false;
+        if (specialShot != SpecialShot.NORMAL && sound != null)
+            sound.combo(specialShot.ordinal() & 1);
     }
 
-    Result update(Course course, AndroidSound sound, double shotAngleDegrees) {
+    Result update(Course course, AndroidSound sound, double shotAngleDegrees,
+            double windSpeed, double windAngleDegrees) {
         bouncedThisStep = false;
+        flightTicks++;
+
+        applySpecialFlight();
+        dx += PangyaMechanics.windAx(windSpeed, windAngleDegrees);
+        dy += PangyaMechanics.windAy(windSpeed, windAngleDegrees);
         dy += GRAVITY;
         setX(x + dx);
         setY(y + dy);
 
         Hit hit = findHit(course);
-        if (hit != null) {
+        if (hit != null)
             handleCollision(course, hit, sound, shotAngleDegrees);
-        }
 
-        if (y > course.height + 10) {
+        if (y > course.height + 10 || x < -80 || x > course.width + 80) {
             if (sound != null)
                 sound.water(Math.hypot(dx, dy));
             return Result.OUT_OF_BOUNDS;
@@ -103,6 +118,28 @@ final class BallState {
         }
         return Result.MOVING;
     }
+
+    private void applySpecialFlight() {
+        switch (specialShot) {
+        case COBRA:
+            if (flightTicks > 22 && flightTicks < 72)
+                dy -= 0.075;
+            break;
+        case SPIKE:
+            if (flightTicks > 34 && dy > -1.2)
+                dy += 0.16;
+            break;
+        case CURVE_LEFT:
+            dx -= 0.010;
+            break;
+        case CURVE_RIGHT:
+            dx += 0.010;
+            break;
+        default:
+            break;
+        }
+    }
+
     private void handleCollision(Course course, Hit hit, AndroidSound sound,
             double shotAngleDegrees) {
         double speed = Math.hypot(dx, dy);
@@ -124,23 +161,32 @@ final class BallState {
         double originalAngle = Math.atan2(dy, dx);
         double hitAngle = Math.atan2(hit.ny, hit.nx);
         double reflectedAngle = 2.0 * hitAngle - originalAngle;
-
         pushOutOfSurface(course, hit);
         speed *= hit.friction;
         dx = -speed * Math.cos(reflectedAngle);
         dy = -speed * Math.sin(reflectedAngle);
 
-        if (shootingStar && !tornado) {
-            dx = 0;
-            dy = 0;
-            shootingStar = false;
-        }
-        if (tornado) {
-            double boosted = Math.hypot(dx, dy) * 1.5;
-            double angle = Math.toRadians(shotAngleDegrees);
-            dx = boosted * Math.cos(angle);
-            dy = boosted * Math.sin(angle);
-            tornado = false;
+        if (!specialLandingApplied) {
+            switch (specialShot) {
+            case TOMAHAWK:
+                dx = 0;
+                dy = 0;
+                break;
+            case TOPSPIN:
+                dx *= 1.30;
+                dy *= 0.55;
+                break;
+            case BACKSPIN:
+                dx *= -0.34;
+                dy *= 0.45;
+                break;
+            case SPIKE:
+                dx *= 0.82;
+                break;
+            default:
+                break;
+            }
+            specialLandingApplied = true;
         }
     }
 
@@ -210,7 +256,6 @@ final class BallState {
         final double nx;
         final double ny;
         final double friction;
-
         Hit(double nx, double ny, double friction) {
             this.nx = nx;
             this.ny = ny;

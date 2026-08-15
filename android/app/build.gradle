@@ -40,3 +40,5 @@ android.sourceSets.main.assets.srcDir(generatedAssets)
 tasks.named('preBuild').configure {
     dependsOn tasks.named('syncSharedGameAssets')
 }
+
+android.sourceSets.main.java.srcDir('../../shared/src/main/java')

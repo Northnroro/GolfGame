@@ -16,6 +16,8 @@ final class PlayerState {
     final int[] scores = new int[3];
     final boolean[] holeOut = new boolean[3];
     int animationFrame;
+    double golferX;
+    double golferY;
 
     PlayerState(Context context, int number, boolean cpu) throws IOException {
         this.number = number;
@@ -28,6 +30,11 @@ final class PlayerState {
         if (spriteSheet == null)
             throw new IOException("Cannot load player sprite " + number);
     }
+    void plantGolferAtBall() {
+        golferX = ball.x;
+        golferY = ball.y;
+    }
+
     void recordScore(int hole, int relativeToPar) {
         scores[hole] = relativeToPar;
         holeOut[hole] = true;
